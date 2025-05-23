@@ -1,3 +1,4 @@
+"""
 import os
 from typing import List, Dict, Any
 from langchain_community.vectorstores import Chroma
@@ -11,7 +12,7 @@ def migrate_chroma_to_pinecone(
     pinecone_env: str = None,
     batch_size: int = 100
 ) -> None:
-    """
+    
     Migrate data from ChromaDB to Pinecone.
     
     Args:
@@ -20,7 +21,7 @@ def migrate_chroma_to_pinecone(
         pinecone_api_key: Pinecone API key (defaults to PINECONE_API_KEY env var)
         pinecone_env: Pinecone environment (defaults to PINECONE_ENV env var)
         batch_size: Number of documents to process in each batch
-    """
+    
     # Initialize embedding model
     embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
@@ -87,3 +88,4 @@ if __name__ == "__main__":
         pinecone_env=args.pinecone_env,
         batch_size=args.batch_size
     ) 
+""""
