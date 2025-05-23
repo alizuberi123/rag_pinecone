@@ -15,7 +15,7 @@ numpy
 pillow
 python-dotenv
 google-generativeai
-huggingface-hub
+huggingface-hub[hf_xet]
 sentence-transformers
 pinecone-client
 typing_extensions
