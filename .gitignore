@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+
+# Streamlit
+.streamlit/
+
+# Keep only the default RAG session structure
+rag_sessions/*
+!rag_sessions/default/
+!rag_sessions/default/chat_history.json
+!rag_sessions/default/files/
+
+# Exclude ChromaDB and diagrams
+rag_sessions/default/chroma_db/
+rag_sessions/default/files/diagrams/
+
+# Exclude other ChromaDB
+chroma_db/
+
+# Exclude uploads
+uploads/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints 
