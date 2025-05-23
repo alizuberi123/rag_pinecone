@@ -7,7 +7,6 @@ def create_rag(name):
     path = os.path.join(BASE_DIR, name)
     if os.path.exists(path):
         return False
-    os.makedirs(os.path.join(path, "chroma_db"), exist_ok=True)
     os.makedirs(os.path.join(path, "files"), exist_ok=True)
     with open(os.path.join(path, "chat_history.json"), "w") as f:
         json.dump([], f)

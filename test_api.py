@@ -18,12 +18,12 @@ from dotenv import load_dotenv
 from datetime import datetime
 
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from utils.rag_manager import create_rag, list_rags, get_rag_path, save_chat_history, load_chat_history
 from utils.retrieval import HybridRetriever
+from utils.pinecone_manager import PineconeManager
 
 # Load environment variables
 load_dotenv()
@@ -34,7 +34,6 @@ BASE_DATA_DIR = os.environ.get("DATA_DIR", ".")
 RAG_SESSIONS_DIR = os.path.join(BASE_DATA_DIR, "rag_sessions")
 active_rag = "default"  # You can modify this based on your needs
 rag_path = os.path.join(RAG_SESSIONS_DIR, active_rag)
-db_path = os.path.join(rag_path, "chroma_db")
 file_dir = os.path.join(rag_path, "files")
 
 app = FastAPI()
@@ -150,18 +149,14 @@ class ConversationMemory:
 embed_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 active_rag = "default"  # You can modify this based on your needs
 rag_path = get_rag_path(active_rag)
-db_path = os.path.join(rag_path, "chroma_db")
 file_dir = os.path.join(rag_path, "files")
 
-# Initialize Chroma DB
-db = Chroma(
-    persist_directory=db_path,
-    embedding_function=embed_model,
-    collection_name="document_collection"
-)
+# Initialize Pinecone
+pinecone_manager = PineconeManager()
+pinecone_index_name = "my-test"  # Use your Pinecone index name
 
-# Initialize retriever and memory
-retriever = HybridRetriever(db, embed_model)
+# Initialize retriever
+retriever = HybridRetriever(pinecone_manager, pinecone_index_name)
 memory = ConversationMemory()
 
 def clean_text(text):
@@ -391,7 +386,7 @@ async def upload_file(
                 doc.metadata["page_number"] = chunk["page_number"]
             documents.extend(docs)
         if documents:
-            db.add_documents(documents)
+            pinecone_manager.add_documents(pinecone_index_name, documents)
         for diagram in diagram_chunks:
             doc = Document(
                 page_content=diagram["text"],
@@ -406,7 +401,7 @@ async def upload_file(
                     "page_number": diagram["page"]
                 }
             )
-            db.add_documents([doc])
+            pinecone_manager.add_documents(pinecone_index_name, [doc])
         return UploadResponse(
             message="File processed successfully",
             filename=file.filename,
@@ -457,9 +452,5 @@ Answer:
             sources=[doc.metadata for doc in filtered_chunks],
             diagrams=diagram_paths
         )
-    except HTTPException as e:
-        raise e
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}") 
+        raise HTTPException(status_code=500, detail=str(e)) 

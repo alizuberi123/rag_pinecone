@@ -385,7 +385,6 @@ If the conversation history doesn't contain relevant information, respond with a
         try:
             # Create thread directories
             os.makedirs(new_thread_path, exist_ok=True)
-            os.makedirs(os.path.join(new_thread_path, "chroma_db"), exist_ok=True)
             os.makedirs(os.path.join(new_thread_path, "files"), exist_ok=True)
             os.makedirs(os.path.join(new_thread_path, "memory"), exist_ok=True)
             
