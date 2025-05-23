@@ -19,3 +19,4 @@ huggingface-hub
 sentence-transformers
 pinecone-client
 typing_extensions
+hf-xet
