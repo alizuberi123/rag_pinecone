@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: rag-chatbot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn test_api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 8000
+    plan: standard
+    memory: 1024
+    disk: 1024 
