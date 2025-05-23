@@ -1,4 +1,8 @@
-streamlit
+fastapi
+uvicorn
+python-multipart
+python-docx
+PyMuPDF
 pdfplumber
 pytesseract
 langchain-core
@@ -11,14 +15,7 @@ numpy
 pillow
 python-dotenv
 google-generativeai
-PyMuPDF
-python-docx
 huggingface-hub
 sentence-transformers
-rank-bm25
-regex
-fastapi
-uvicorn
-python-multipart
-typing_extensions
 pinecone-client
+typing_extensions
