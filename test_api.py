@@ -27,25 +27,32 @@ from utils.pinecone_manager import PineconeManager
 
 # Load environment variables
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+print('GEMINI_API_KEY:', os.getenv('GEMINI_API_KEY'))
+print('PINECONE_API_KEY:', os.getenv('PINECONE_API_KEY'))
+print('PINECONE_ENVIRONMENT:', os.getenv('PINECONE_ENVIRONMENT'))
 
-# Use DATA_DIR env variable for base data directory
-BASE_DATA_DIR = os.environ.get("DATA_DIR", ".")
-RAG_SESSIONS_DIR = os.path.join(BASE_DATA_DIR, "rag_sessions")
-active_rag = "default"  # You can modify this based on your needs
-rag_path = os.path.join(RAG_SESSIONS_DIR, active_rag)
-file_dir = os.path.join(rag_path, "files")
+# Configure API keys
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
 
-app = FastAPI()
+if not all([GEMINI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT]):
+    raise ValueError("Missing required environment variables: GEMINI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT")
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Initialize Pinecone
+pinecone_manager = PineconeManager(
+    api_key=PINECONE_API_KEY,
+    environment=PINECONE_ENVIRONMENT
 )
+pinecone_index_name = "my-test"  # Use your Pinecone index name
+
+# Initialize embeddings model
+embed_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+# Initialize retriever
+retriever = HybridRetriever(pinecone_manager, pinecone_index_name)
 
 # Pydantic models for request/response
 class QueryRequest(BaseModel):
@@ -145,19 +152,27 @@ class ConversationMemory:
 
         return "\n".join(context_parts)
 
-# Initialize global variables
-embed_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-active_rag = "default"  # You can modify this based on your needs
-rag_path = get_rag_path(active_rag)
-file_dir = os.path.join(rag_path, "files")
-
-# Initialize Pinecone
-pinecone_manager = PineconeManager()
-pinecone_index_name = "my-test"  # Use your Pinecone index name
-
 # Initialize retriever
 retriever = HybridRetriever(pinecone_manager, pinecone_index_name)
 memory = ConversationMemory()
+
+# Use DATA_DIR env variable for base data directory
+BASE_DATA_DIR = os.environ.get("DATA_DIR", ".")
+RAG_SESSIONS_DIR = os.path.join(BASE_DATA_DIR, "rag_sessions")
+active_rag = "default"  # You can modify this based on your needs
+rag_path = os.path.join(RAG_SESSIONS_DIR, active_rag)
+file_dir = os.path.join(rag_path, "files")
+
+app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def clean_text(text):
     # Remove extra whitespace
@@ -166,12 +181,13 @@ def clean_text(text):
     text = re.sub(r'[^\w\s.,!?-]', '', text)
     return text.strip()
 
-def extract_text_and_diagrams(file_path: str, file_type: str):
+def extract_text_and_diagrams(file_content: bytes, file_type: str, filename: str):
     text_chunks = []
     diagram_chunks = []
+    file_obj = io.BytesIO(file_content)
 
     if file_type == "application/pdf":
-        with pdfplumber.open(file_path) as pdf:
+        with pdfplumber.open(file_obj) as pdf:
             # Extract section headings for each page
             page_sections = []
             section_pattern = re.compile(r'^(\d+(\.\d+)*\.?\s+.+|[A-Z][A-Z\s]{3,})$', re.MULTILINE)
@@ -196,7 +212,7 @@ def extract_text_and_diagrams(file_path: str, file_type: str):
                         "page_number": i + 1
                     })
         # Extract diagrams and assign section
-        pdf_doc = fitz.open(file_path)
+        pdf_doc = fitz.open(stream=file_content, filetype="pdf")
         for page_num in range(len(pdf_doc)):
             page = pdf_doc[page_num]
             image_list = page.get_images(full=True)
@@ -208,18 +224,26 @@ def extract_text_and_diagrams(file_path: str, file_type: str):
                 base_image = pdf_doc.extract_image(xref)
                 image_bytes = base_image["image"]
                 img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-                image_dir = os.path.join(file_dir, "diagrams")
-                os.makedirs(image_dir, exist_ok=True)
-                image_path = os.path.join(image_dir, f"{os.path.basename(file_path)}_page{page_num}_{img_index}.png")
-                img_pil.save(image_path)
+                
+                # Process diagram text
                 ocr_text = pytesseract.image_to_string(img_pil)
                 cleaned = clean_text(ocr_text)
                 if not cleaned.strip():
                     try:
                         vision_model = genai.GenerativeModel("models/gemini-1.5-pro-latest")
-                        image_data = content_types.ImageData.from_pil_image(img_pil)
+                        # Convert PIL image to bytes
+                        img_byte_arr = io.BytesIO()
+                        img_pil.save(img_byte_arr, format='PNG')
+                        img_byte_arr = img_byte_arr.getvalue()
+                        
+                        # Create image part for the model (single dict, not a list)
+                        image_part = {
+                            "mime_type": "image/png",
+                            "data": img_byte_arr
+                        }
+                        
                         gemini_result = vision_model.generate_content(
-                            [image_data, "Describe the diagram in detail as if explaining it to a reader."]
+                            [image_part, "Describe the diagram in detail as if explaining it to a reader."]
                         )
                         cleaned = gemini_result.text.strip()
                     except Exception as e:
@@ -228,20 +252,26 @@ def extract_text_and_diagrams(file_path: str, file_type: str):
                 if cleaned:
                     diagram_chunks.append({
                         "text": cleaned,
-                        "source": os.path.basename(file_path),
+                        "source": filename,
                         "page": page_num + 1,
                         "index": img_index,
-                        "image_path": image_path,
                         "section": section
                     })
     elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        doc = docx.Document(file_path)
+        doc = docx.Document(file_obj)
         text = "\n".join([para.text for para in doc.paragraphs])
-        text_chunks.append({"text": clean_text(text), "section": "General", "page_number": 1})
+        text_chunks.append({
+            "text": clean_text(text),
+            "section": "General",
+            "page_number": 1
+        })
     elif file_type == "text/plain":
-        with open(file_path, 'r') as f:
-            text = f.read()
-            text_chunks.append({"text": clean_text(text), "section": "General", "page_number": 1})
+        text = file_obj.read().decode('utf-8')
+        text_chunks.append({
+            "text": clean_text(text),
+            "section": "General",
+            "page_number": 1
+        })
     return text_chunks, diagram_chunks
 
 def structured_chunking(raw_text: str, filename: str):
@@ -367,14 +397,18 @@ async def upload_file(
     car_year: str = Form(None)
 ):
     try:
-        file_path = os.path.join(file_dir, file.filename)
-        with open(file_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+        # Read file content directly into memory
+        content = await file.read()
+        
+        # Extract car info
         car_make, car_model, car_year = extract_car_info(file.filename, car_make, car_model, car_year)
         if not (car_make and car_model and car_year):
-            raise HTTPException(status_code=400, detail="car_make, car_model, and car_year are required (either as form fields or in the filename)")
-        text_chunks, diagram_chunks = extract_text_and_diagrams(file_path, file.content_type)
+            raise HTTPException(status_code=400, detail="car_make, car_model, and car_year are required")
+
+        # Process file content
+        text_chunks, diagram_chunks = extract_text_and_diagrams(content, file.content_type, file.filename)
+
+        # Create documents for Pinecone
         documents = []
         for chunk in text_chunks:
             docs = structured_chunking(chunk["text"], file.filename)
@@ -385,8 +419,8 @@ async def upload_file(
                 doc.metadata["section"] = chunk["section"]
                 doc.metadata["page_number"] = chunk["page_number"]
             documents.extend(docs)
-        if documents:
-            pinecone_manager.add_documents(pinecone_index_name, documents)
+
+        # Add diagram chunks to documents
         for diagram in diagram_chunks:
             doc = Document(
                 page_content=diagram["text"],
@@ -394,19 +428,23 @@ async def upload_file(
                     "filename": diagram["source"],
                     "section": diagram["section"],
                     "type": "diagram",
-                    "image_path": diagram["image_path"],
                     "car_make": car_make,
                     "car_model": car_model,
                     "car_year": car_year,
                     "page_number": diagram["page"]
                 }
             )
-            pinecone_manager.add_documents(pinecone_index_name, [doc])
+            documents.append(doc)
+
+        # Store in Pinecone
+        if documents:
+            pinecone_manager.add_documents(pinecone_index_name, documents)
+
         return UploadResponse(
             message="File processed successfully",
             filename=file.filename,
-            text_chunks=len(documents),
-            diagram_chunks=len(diagram_chunks),
+            text_chunks=len([d for d in documents if d.metadata.get("type") != "diagram"]),
+            diagram_chunks=len([d for d in documents if d.metadata.get("type") == "diagram"]),
             car_make=car_make,
             car_model=car_model,
             car_year=car_year
@@ -437,6 +475,21 @@ async def query_documents(query: QueryRequest):
         prompt = f"""
 You are a highly knowledgeable automotive assistant. Answer the user's question using the provided car manual context below. 
 If the manual is vague or incomplete, supplement the answer with your own expert knowledge, but always be specific, step-by-step, and accurate for the given car make, model, and year.
+
+Format your response in a clear, structured way:
+- Use bullet points for lists
+- Use numbered steps for procedures
+- Keep paragraphs short and focused
+- Avoid markdown formatting (no **, ##, etc.)
+- Use clear headings if needed
+- Be concise but complete
+
+Important guidelines:
+- Provide direct, actionable information
+- Skip generic disclaimers and safety warnings
+- Keep responses between 3-7 sentences for simple questions
+- For procedures, use 3-8 clear steps
+- Focus on the specific car make, model, and year mentioned
 
 Context from the manual:
 {compressed_content}
